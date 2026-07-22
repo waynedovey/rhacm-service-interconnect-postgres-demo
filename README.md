@@ -285,6 +285,29 @@ scripts/                              Bootstrap helpers and tests
 
 ## Troubleshooting
 
+### Placements show `No status`
+
+A `Placement` can only select clusters from a `ManagedClusterSet` that is bound
+to the Placement namespace. This repository binds the RHACM `global` cluster
+set to both:
+
+```text
+si-demo-policies
+openshift-gitops
+```
+
+Check the bindings and decisions:
+
+```bash
+oc get managedclustersetbinding -A
+oc get placementdecision -n si-demo-policies
+oc get placementdecision -n openshift-gitops
+```
+
+Expected policy decisions include `local-cluster`, `cluster-pwv6d`, and
+`cluster-7b6lh`.
+
+
 Check RHACM policies:
 
 ```bash

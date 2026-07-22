@@ -17,12 +17,22 @@ spec:
     - group: '*'
       kind: '*'
 ---
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: global
+  namespace: openshift-gitops
+spec:
+  clusterSet: global
+---
 apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
 metadata:
   name: si-demo-clusters
   namespace: openshift-gitops
 spec:
+  clusterSets:
+    - global
   predicates:
     - requiredClusterSelector:
         labelSelector:

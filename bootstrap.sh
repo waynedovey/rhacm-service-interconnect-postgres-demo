@@ -71,6 +71,17 @@ oc label managedcluster "${SITE_B_CLUSTER}" \
 log "Installing operators with RHACM policies"
 oc apply -k "${ROOT_DIR}/hub/policies"
 
+log "Waiting for RHACM Placement decisions"
+wait_until "local-cluster policy placement selects local-cluster" 600 \
+  placement_has_cluster si-demo-policies local-cluster local-cluster
+wait_until "managed policy placement selects ${SITE_A_CLUSTER}" 600 \
+  placement_has_cluster si-demo-policies si-demo-managed-clusters "${SITE_A_CLUSTER}"
+wait_until "managed policy placement selects ${SITE_B_CLUSTER}" 600 \
+  placement_has_cluster si-demo-policies si-demo-managed-clusters "${SITE_B_CLUSTER}"
+
+show_placement_decisions si-demo-policies
+
+log "Waiting for RHACM policies to become compliant"
 wait_until "GitOps operator policy is compliant" 3600 \
   policy_compliant install-openshift-gitops
 wait_until "Service Interconnect policy is compliant" 3600 \

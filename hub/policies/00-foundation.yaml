@@ -3,12 +3,22 @@ kind: Namespace
 metadata:
   name: si-demo-policies
 ---
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: global
+  namespace: si-demo-policies
+spec:
+  clusterSet: global
+---
 apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
 metadata:
   name: local-cluster
   namespace: si-demo-policies
 spec:
+  clusterSets:
+    - global
   predicates:
     - requiredClusterSelector:
         labelSelector:
@@ -21,6 +31,8 @@ metadata:
   name: si-demo-managed-clusters
   namespace: si-demo-policies
 spec:
+  clusterSets:
+    - global
   predicates:
     - requiredClusterSelector:
         labelSelector:

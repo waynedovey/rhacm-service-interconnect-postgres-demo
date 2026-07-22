@@ -72,6 +72,33 @@ policy_compliant() {
   [[ "$(oc -n si-demo-policies get policy "${policy}" -o jsonpath='{.status.compliant}' 2>/dev/null)" == "Compliant" ]]
 }
 
+placement_has_cluster() {
+  local namespace="$1"
+  local placement="$2"
+  local cluster="$3"
+
+  oc -n "${namespace}" get placementdecision \
+    -l "cluster.open-cluster-management.io/placement=${placement}" \
+    -o json 2>/dev/null |
+    python3 -c '
+import json, sys
+cluster=sys.argv[1]
+obj=json.load(sys.stdin)
+for item in obj.get("items", []):
+    for decision in item.get("status", {}).get("decisions", []):
+        if decision.get("clusterName") == cluster:
+            raise SystemExit(0)
+raise SystemExit(1)
+' "${cluster}"
+}
+
+show_placement_decisions() {
+  local namespace="$1"
+  oc -n "${namespace}" get placementdecision \
+    -o custom-columns='NAME:.metadata.name,PLACEMENT:.metadata.labels.cluster\.open-cluster-management\.io/placement,CLUSTERS:.status.decisions[*].clusterName' \
+    2>/dev/null || true
+}
+
 get_cluster_kubeconfig() {
   local cluster="$1"
   local output="${KUBECONFIG_DIR}/${cluster}.kubeconfig"
