@@ -9,7 +9,14 @@ log "RHACM policies"
 oc get policy -n si-demo-policies
 
 log "RHACM placement and GitOps registration"
-oc get placement,gitopscluster -n openshift-gitops
+oc get managedclustersetbinding,placement,placementdecision,gitopscluster \
+  -n openshift-gitops
+
+log "ApplicationSet Placement generator"
+oc get configmap ocm-placement-generator -n openshift-gitops -o yaml
+oc auth can-i list placementdecisions.cluster.open-cluster-management.io \
+  -n openshift-gitops \
+  --as=system:serviceaccount:openshift-gitops:openshift-gitops-applicationset-controller
 
 log "Argo CD applications"
 oc get applicationset,application -n openshift-gitops

@@ -6,16 +6,56 @@ metadata:
 spec:
   description: RHACM Service Interconnect PostgreSQL demonstration
   sourceRepos:
-    - '*'
+  - '*'
   destinations:
-    - namespace: '*'
-      server: '*'
+  - namespace: '*'
+    server: '*'
   clusterResourceWhitelist:
-    - group: '*'
-      kind: '*'
+  - group: '*'
+    kind: '*'
   namespaceResourceWhitelist:
-    - group: '*'
-      kind: '*'
+  - group: '*'
+    kind: '*'
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ocm-placement-generator
+  namespace: openshift-gitops
+data:
+  apiVersion: cluster.open-cluster-management.io/v1beta1
+  kind: placementdecisions
+  statusListKey: decisions
+  matchKey: clusterName
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: si-demo-placement-consumer
+  namespace: openshift-gitops
+rules:
+- apiGroups:
+  - cluster.open-cluster-management.io
+  resources:
+  - placementdecisions
+  verbs:
+  - get
+  - list
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: si-demo-placement-consumer
+  namespace: openshift-gitops
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: si-demo-placement-consumer
+subjects:
+- kind: ServiceAccount
+  name: openshift-gitops-applicationset-controller
+  namespace: openshift-gitops
 ---
 apiVersion: cluster.open-cluster-management.io/v1beta2
 kind: ManagedClusterSetBinding
@@ -32,16 +72,16 @@ metadata:
   namespace: openshift-gitops
 spec:
   clusterSets:
-    - global
+  - global
   predicates:
-    - requiredClusterSelector:
-        labelSelector:
-          matchExpressions:
-            - key: name
-              operator: In
-              values:
-                - cluster-pwv6d
-                - cluster-7b6lh
+  - requiredClusterSelector:
+      labelSelector:
+        matchExpressions:
+        - key: name
+          operator: In
+          values:
+          - cluster-pwv6d
+          - cluster-7b6lh
 ---
 apiVersion: apps.open-cluster-management.io/v1beta1
 kind: GitOpsCluster

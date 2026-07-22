@@ -127,6 +127,14 @@ wait_until "openshift-gitops namespace" 1800 \
 log "Creating RHACM GitOps placement and registration"
 oc apply -f "${ROOT_DIR}/hub/gitops/base.yaml"
 
+wait_until "OCM Placement generator ConfigMap exists" 120 \
+  oc -n openshift-gitops get configmap ocm-placement-generator
+
+wait_until "ApplicationSet controller can list PlacementDecisions" 120 \
+  oc auth can-i list placementdecisions.cluster.open-cluster-management.io \
+    -n openshift-gitops \
+    --as=system:serviceaccount:openshift-gitops:openshift-gitops-applicationset-controller
+
 wait_until "GitOps placement selects ${SITE_A_CLUSTER}" 600 \
   placement_has_cluster openshift-gitops si-demo-clusters "${SITE_A_CLUSTER}"
 wait_until "GitOps placement selects ${SITE_B_CLUSTER}" 600 \
@@ -147,6 +155,18 @@ Path(target).write_text(text)
 PY
 
 oc apply -f "${rendered_appset}"
+
+wait_until "ApplicationSet generated ${SITE_A_CLUSTER}-si-demo" 300 \
+  oc -n openshift-gitops get application "${SITE_A_CLUSTER}-si-demo"
+wait_until "ApplicationSet generated ${SITE_B_CLUSTER}-si-demo" 300 \
+  oc -n openshift-gitops get application "${SITE_B_CLUSTER}-si-demo"
+
+oc -n openshift-gitops get applicationset si-demo \
+  -o custom-columns='NAME:.metadata.name,HEALTH:.status.health.status,MESSAGE:.status.health.message'
+
+oc -n openshift-gitops get application \
+  "${SITE_A_CLUSTER}-si-demo" "${SITE_B_CLUSTER}-si-demo" \
+  -o custom-columns='NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status'
 
 log "Retrieving Hive admin kubeconfigs"
 SITE_A_KUBECONFIG="$(get_cluster_kubeconfig "${SITE_A_CLUSTER}")"

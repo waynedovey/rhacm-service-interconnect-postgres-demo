@@ -285,6 +285,28 @@ scripts/                              Bootstrap helpers and tests
 
 ## Troubleshooting
 
+
+### ApplicationSet reports `ocm-placement-generator not found`
+
+The `clusterDecisionResource` generator requires a ConfigMap in the same
+namespace as the `ApplicationSet`. This repository creates
+`openshift-gitops/ocm-placement-generator` and grants the ApplicationSet
+controller permission to read RHACM `PlacementDecision` resources.
+
+Verify it with:
+
+```bash
+oc get configmap ocm-placement-generator -n openshift-gitops -o yaml
+
+oc auth can-i list placementdecisions.cluster.open-cluster-management.io \
+  -n openshift-gitops \
+  --as=system:serviceaccount:openshift-gitops:openshift-gitops-applicationset-controller
+
+oc get placementdecision -n openshift-gitops
+oc get applicationset,application -n openshift-gitops
+```
+
+
 ### Repeated `JSONDecodeError` while waiting for operators
 
 An older `wait_for_olm_subscription` implementation used both a here-string and
