@@ -299,61 +299,77 @@ wait_for_olm_subscription() {
   local timeout_seconds="${7:-1800}"
 
   local start now last_message=0
-  local payload
+  local actual_package=""
+  local actual_source=""
+  local actual_channel=""
+  local installed_csv=""
+  local current_csv=""
+  local state=""
+
   start="$(date +%s)"
 
   while true; do
-    payload="$(
-      site_oc "${cluster}" -n "${namespace}" \
-        get subscriptions.operators.coreos.com "${subscription}" \
-        -o json 2>/dev/null || true
-    )"
+    if site_oc "${cluster}" -n "${namespace}" \
+      get subscriptions.operators.coreos.com "${subscription}" \
+      >/dev/null 2>&1
+    then
+      actual_package="$(
+        site_oc "${cluster}" -n "${namespace}" \
+          get subscriptions.operators.coreos.com "${subscription}" \
+          -o jsonpath='{.spec.name}'
+      )"
+      actual_source="$(
+        site_oc "${cluster}" -n "${namespace}" \
+          get subscriptions.operators.coreos.com "${subscription}" \
+          -o jsonpath='{.spec.source}'
+      )"
+      actual_channel="$(
+        site_oc "${cluster}" -n "${namespace}" \
+          get subscriptions.operators.coreos.com "${subscription}" \
+          -o jsonpath='{.spec.channel}'
+      )"
+      installed_csv="$(
+        site_oc "${cluster}" -n "${namespace}" \
+          get subscriptions.operators.coreos.com "${subscription}" \
+          -o jsonpath='{.status.installedCSV}'
+      )"
+      current_csv="$(
+        site_oc "${cluster}" -n "${namespace}" \
+          get subscriptions.operators.coreos.com "${subscription}" \
+          -o jsonpath='{.status.currentCSV}'
+      )"
+      state="$(
+        site_oc "${cluster}" -n "${namespace}" \
+          get subscriptions.operators.coreos.com "${subscription}" \
+          -o jsonpath='{.status.state}'
+      )"
 
-    if [[ -n "${payload}" ]]; then
-      if python3 - "${expected_package}" "${expected_source}" \
-        "${expected_channel}" <<<"${payload}" <<'PY'
-import json
-import sys
-
-expected_package, expected_source, expected_channel = sys.argv[1:]
-obj = json.load(sys.stdin)
-spec = obj.get("spec", {})
-
-if spec.get("name") != expected_package:
-    raise SystemExit(2)
-if spec.get("source") != expected_source:
-    raise SystemExit(3)
-if spec.get("channel") != expected_channel:
-    raise SystemExit(4)
-
-status = obj.get("status", {})
-raise SystemExit(0 if status.get("installedCSV") else 1)
-PY
+      if [[ "${actual_package}" != "${expected_package}" ]] ||
+         [[ "${actual_source}" != "${expected_source}" ]] ||
+         [[ "${actual_channel}" != "${expected_channel}" ]]
       then
-        local installed_csv
-        installed_csv="$(
-          python3 -c '
-import json
-import sys
-print(json.load(sys.stdin).get("status", {}).get("installedCSV", ""))
-' <<<"${payload}"
-        )"
-        ok "${cluster}: ${subscription} installed as ${installed_csv}"
-        return 0
-      else
-        local rc=$?
-        case "${rc}" in
-          2|3|4)
-            printf '[ERROR] %s: Subscription %s has the wrong package, source, or channel.\n' \
-              "${cluster}" "${subscription}" >&2
-            site_oc "${cluster}" -n "${namespace}" \
-              get subscriptions.operators.coreos.com "${subscription}" \
-              -o custom-columns='NAME:.metadata.name,PACKAGE:.spec.name,SOURCE:.spec.source,CHANNEL:.spec.channel,STATE:.status.state,CURRENT:.status.currentCSV,INSTALLED:.status.installedCSV' \
-              >&2 || true
-            show_operator_catalog "${cluster}" "${expected_package}" >&2
-            return 1
-            ;;
-        esac
+        printf '[ERROR] %s: Subscription %s has unexpected settings.\n' \
+          "${cluster}" "${subscription}" >&2
+        printf '  expected: package=%s source=%s channel=%s\n' \
+          "${expected_package}" "${expected_source}" "${expected_channel}" >&2
+        printf '  actual:   package=%s source=%s channel=%s\n' \
+          "${actual_package:-<none>}" \
+          "${actual_source:-<none>}" \
+          "${actual_channel:-<none>}" >&2
+        show_operator_catalog "${cluster}" "${expected_package}" >&2
+        return 1
+      fi
+
+      if [[ -n "${installed_csv}" ]]; then
+        if site_oc "${cluster}" -n "${namespace}" \
+          get clusterserviceversions.operators.coreos.com \
+          "${installed_csv}" \
+          -o jsonpath='{.status.phase}' 2>/dev/null |
+          grep -qx 'Succeeded'
+        then
+          ok "${cluster}: ${subscription} installed as ${installed_csv}"
+          return 0
+        fi
       fi
     fi
 
@@ -377,37 +393,15 @@ print(json.load(sys.stdin).get("status", {}).get("installedCSV", ""))
       printf '[INFO] %s: waiting for %s (%s/%s)\n' \
         "${cluster}" "${subscription}" \
         "${expected_source}" "${expected_channel}" >&2
+      printf '  state=%s currentCSV=%s installedCSV=%s\n' \
+        "${state:-<none>}" \
+        "${current_csv:-<none>}" \
+        "${installed_csv:-<none>}" >&2
 
-      if [[ -n "${payload}" ]]; then
-        python3 -c '
-import json
-import sys
-
-obj = json.load(sys.stdin)
-status = obj.get("status", {})
-conditions = status.get("conditions", [])
-
-print(
-    "  state={state} currentCSV={current} installedCSV={installed}".format(
-        state=status.get("state", "<none>"),
-        current=status.get("currentCSV", "<none>"),
-        installed=status.get("installedCSV", "<none>"),
-    ),
-    file=sys.stderr,
-)
-
-for condition in conditions:
-    print(
-        "  condition type={type} status={status} reason={reason} message={message}".format(
-            type=condition.get("type", ""),
-            status=condition.get("status", ""),
-            reason=condition.get("reason", ""),
-            message=condition.get("message", ""),
-        ),
-        file=sys.stderr,
-    )
-' <<<"${payload}"
-      fi
+      site_oc "${cluster}" -n "${namespace}" \
+        get subscriptions.operators.coreos.com "${subscription}" \
+        -o jsonpath='{range .status.conditions[*]}  condition type={.type} status={.status} reason={.reason} message={.message}{"\\n"}{end}' \
+        >&2 || true
 
       last_message="${now}"
     fi

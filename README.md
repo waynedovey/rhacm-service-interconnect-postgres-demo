@@ -285,6 +285,24 @@ scripts/                              Bootstrap helpers and tests
 
 ## Troubleshooting
 
+### Repeated `JSONDecodeError` while waiting for operators
+
+An older `wait_for_olm_subscription` implementation used both a here-string and
+a here-document on the same `python3 -` command. Both compete for standard
+input: Python received the program from the here-document, leaving no JSON for
+`json.load()`.
+
+The corrected helper no longer uses Python for this check. It reads the
+Subscription and CSV fields directly with Kubernetes `jsonpath`.
+
+When the Subscription already reports an installed CSV, the corrected output is
+similar to:
+
+```text
+[OK] cluster-pwv6d: skupper-operator installed as skupper-operator.v2.2.1-rh-1
+```
+
+
 ### Service Interconnect and CloudNativePG Subscriptions never resolve
 
 The catalog values used by this environment are:
