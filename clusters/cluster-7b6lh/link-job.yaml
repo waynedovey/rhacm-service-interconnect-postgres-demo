@@ -1,0 +1,109 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: service-interconnect-link-bootstrap
+  namespace: bookinfo
+  annotations:
+    argocd.argoproj.io/sync-wave: "-11"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: service-interconnect-link-bootstrap
+  namespace: bookinfo
+  annotations:
+    argocd.argoproj.io/sync-wave: "-11"
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+  - apiGroups:
+      - skupper.io
+    resources:
+      - accesstokens
+      - links
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: service-interconnect-link-bootstrap
+  namespace: bookinfo
+  annotations:
+    argocd.argoproj.io/sync-wave: "-11"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: service-interconnect-link-bootstrap
+subjects:
+  - kind: ServiceAccount
+    name: service-interconnect-link-bootstrap
+    namespace: bookinfo
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: service-interconnect-link-bootstrap
+  namespace: bookinfo
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+spec:
+  backoffLimit: 20
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: service-interconnect-link-bootstrap
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: service-interconnect-link-bootstrap
+      containers:
+        - name: create-token
+          image: registry.redhat.io/openshift4/ose-cli:v4.22
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - -ec
+          args:
+            - |
+              until oc get secret service-interconnect-token-ca >/dev/null 2>&1 &&
+                    oc get secret service-interconnect-token-metadata >/dev/null 2>&1; do
+                echo "Waiting for External Secrets to create token data..."
+                sleep 10
+              done
+
+              if oc get accesstoken token-to-cluster-pwv6d >/dev/null 2>&1; then
+                echo "AccessToken already exists"
+                exit 0
+              fi
+
+              URL="$(oc get secret service-interconnect-token-metadata -o jsonpath='{.data.url}' | base64 -d)"
+              CODE="$(oc get secret service-interconnect-token-metadata -o jsonpath='{.data.code}' | base64 -d)"
+
+              {
+                echo "apiVersion: skupper.io/v2alpha1"
+                echo "kind: AccessToken"
+                echo "metadata:"
+                echo "  name: token-to-cluster-pwv6d"
+                echo "  namespace: bookinfo"
+                echo "spec:"
+                printf '  code: "%s"\n' "${CODE}"
+                printf '  url: "%s"\n' "${URL}"
+                echo "  ca: |-"
+                sed 's/^/    /' /token-ca/ca
+              } | oc apply -f -
+          volumeMounts:
+            - name: token-ca
+              mountPath: /token-ca
+              readOnly: true
+      volumes:
+        - name: token-ca
+          secret:
+            secretName: service-interconnect-token-ca

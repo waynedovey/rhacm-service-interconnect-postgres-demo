@@ -1,0 +1,37 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: bookinfo-db-replica
+  namespace: bookinfo
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+spec:
+  instances: 2
+  bootstrap:
+    pg_basebackup:
+      source: bookinfo-db
+  replica:
+    enabled: true
+    source: bookinfo-db
+  externalClusters:
+    - name: bookinfo-db
+      connectionParameters:
+        host: postgres-site-a
+        port: "5432"
+        user: streaming_replica
+        dbname: postgres
+        sslmode: verify-ca
+        connect_timeout: "10"
+      sslKey:
+        name: bookinfo-db-replication
+        key: tls.key
+      sslCert:
+        name: bookinfo-db-replication
+        key: tls.crt
+      sslRootCert:
+        name: bookinfo-db-ca
+        key: ca.crt
+  storage:
+    size: 10Gi
+  monitoring:
+    enablePodMonitor: true

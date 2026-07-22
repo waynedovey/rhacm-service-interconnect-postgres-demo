@@ -1,0 +1,8 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - 00-foundation.yaml
+  - 10-policy-gitops-hub.yaml
+  - 20-policy-service-interconnect.yaml
+  - 30-policy-external-secrets.yaml
+  - 40-policy-cloudnative-pg.yaml

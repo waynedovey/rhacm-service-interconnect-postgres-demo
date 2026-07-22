@@ -1,0 +1,288 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: details
+  namespace: bookinfo
+  labels:
+    app: details
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+spec:
+  ports:
+    - port: 9080
+      name: http
+  selector:
+    app: details
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: details-v1
+  namespace: bookinfo
+  labels:
+    app: details
+    version: v1
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: details
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: details
+        version: v1
+    spec:
+      containers:
+        - name: details
+          image: docker.io/istio/examples-bookinfo-details-v1:1.20.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9080
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ratings
+  namespace: bookinfo
+  labels:
+    app: ratings
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+spec:
+  ports:
+    - port: 9080
+      name: http
+  selector:
+    app: ratings
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ratings-v1
+  namespace: bookinfo
+  labels:
+    app: ratings
+    version: v1
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ratings
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: ratings
+        version: v1
+    spec:
+      containers:
+        - name: ratings
+          image: docker.io/istio/examples-bookinfo-ratings-v1:1.20.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9080
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: reviews
+  namespace: bookinfo
+  labels:
+    app: reviews
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+spec:
+  ports:
+    - port: 9080
+      name: http
+  selector:
+    app: reviews
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reviews-v1
+  namespace: bookinfo
+  labels:
+    app: reviews
+    version: v1
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: reviews
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: reviews
+        version: v1
+    spec:
+      containers:
+        - name: reviews
+          image: docker.io/istio/examples-bookinfo-reviews-v1:1.20.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9080
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: productpage
+  namespace: bookinfo
+  labels:
+    app: productpage
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+spec:
+  ports:
+    - port: 9080
+      name: http
+  selector:
+    app: productpage
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: productpage
+  namespace: bookinfo
+  labels:
+    app: productpage
+    version: v1
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: productpage
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: productpage
+        version: v1
+    spec:
+      containers:
+        - name: productpage
+          image: docker.io/istio/examples-bookinfo-productpage-v1:1.20.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9080
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+        - name: db-heartbeat
+          image: quay.io/sclorg/postgresql-16-c9s:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - -ec
+          args:
+            - |
+              export PGPASSWORD="${POSTGRES_PASSWORD}"
+              CONNECTION="host=postgres-site-a,postgres-site-b port=5432,5432 dbname=${POSTGRES_DATABASE} user=${POSTGRES_USER} target_session_attrs=read-write connect_timeout=5 application_name=bookinfo-${SITE_ID}"
+              until psql "${CONNECTION}" -v ON_ERROR_STOP=1 -c "
+                CREATE TABLE IF NOT EXISTS site_heartbeats (
+                  id BIGSERIAL PRIMARY KEY,
+                  site TEXT NOT NULL,
+                  pod TEXT NOT NULL,
+                  observed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+              "; do
+                echo "Waiting for writable PostgreSQL through Service Interconnect..."
+                sleep 10
+              done
+              while true; do
+                psql "${CONNECTION}" -v ON_ERROR_STOP=1 -c "
+                  INSERT INTO site_heartbeats(site, pod)
+                  VALUES ('${SITE_ID}', '${HOSTNAME}');
+                  DELETE FROM site_heartbeats
+                  WHERE observed_at < now() - interval '2 hours';
+                " || true
+                psql "${CONNECTION}" -c "
+                  SELECT site, count(*) AS heartbeats, max(observed_at) AS latest
+                  FROM site_heartbeats
+                  GROUP BY site
+                  ORDER BY site;
+                " || true
+                sleep 15
+              done
+          env:
+            - name: SITE_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: site-config
+                  key: site
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: bookinfo-db-app
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: bookinfo-db-app
+                  key: password
+            - name: POSTGRES_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: bookinfo-db-app
+                  key: database
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: bookinfo
+  namespace: bookinfo
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+spec:
+  to:
+    kind: Service
+    name: productpage
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

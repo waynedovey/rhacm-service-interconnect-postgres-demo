@@ -1,0 +1,57 @@
+apiVersion: skupper.io/v2alpha1
+kind: Site
+metadata:
+  name: cluster-pwv6d
+  namespace: bookinfo
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  linkAccess: default
+  settings:
+    size: small
+---
+apiVersion: skupper.io/v2alpha1
+kind: AccessGrant
+metadata:
+  name: grant-cluster-pwv6d
+  namespace: bookinfo
+  annotations:
+    argocd.argoproj.io/sync-wave: "-15"
+spec:
+  redemptionsAllowed: 5
+  expirationWindow: 24h
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-site-a
+  namespace: bookinfo
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  type: ExternalName
+  externalName: bookinfo-db-rw.bookinfo.svc.cluster.local
+---
+apiVersion: skupper.io/v2alpha1
+kind: Connector
+metadata:
+  name: postgres-site-a
+  namespace: bookinfo
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  routingKey: postgres-site-a
+  host: bookinfo-db-rw
+  port: 5432
+---
+apiVersion: skupper.io/v2alpha1
+kind: Listener
+metadata:
+  name: postgres-site-b
+  namespace: bookinfo
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  routingKey: postgres-site-b
+  host: postgres-site-b
+  port: 5432

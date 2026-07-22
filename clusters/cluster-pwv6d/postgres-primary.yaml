@@ -1,0 +1,32 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: bookinfo-db
+  namespace: bookinfo
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  instances: 2
+  bootstrap:
+    initdb:
+      database: bookinfo
+      owner: bookinfo
+      secret:
+        name: bookinfo-db-app
+      postInitApplicationSQL:
+        - |
+          CREATE TABLE IF NOT EXISTS site_heartbeats (
+            id BIGSERIAL PRIMARY KEY,
+            site TEXT NOT NULL,
+            pod TEXT NOT NULL,
+            observed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+          );
+  storage:
+    size: 10Gi
+  postgresql:
+    parameters:
+      max_wal_senders: "10"
+      max_replication_slots: "10"
+      wal_keep_size: 1GB
+  monitoring:
+    enablePodMonitor: true
