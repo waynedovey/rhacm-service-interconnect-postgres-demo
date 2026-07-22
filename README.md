@@ -286,6 +286,31 @@ scripts/                              Bootstrap helpers and tests
 ## Troubleshooting
 
 
+### Wait or link Job fails to pull `openshift4/ose-cli:v4.22`
+
+OpenShift 4.13 and later use RHEL 9 component images. The CLI image used by
+the demo Jobs is:
+
+```text
+registry.redhat.io/openshift4/ose-cli-rhel9:v4.22
+```
+
+The older pull specification without `-rhel9` can return `manifest
+unknown`.
+
+Kubernetes Job pod templates are immutable. If an older Job was already
+created, pushing a corrected Git manifest is not enough by itself while an
+Argo CD sync is blocked. Delete the old Jobs and force a hard refresh so
+Argo CD recreates them from the corrected commit.
+
+```bash
+oc --kubeconfig .work/kubeconfigs/cluster-pwv6d.kubeconfig       delete job wait-for-bookinfo-db-app       -n bookinfo --ignore-not-found
+
+oc --kubeconfig .work/kubeconfigs/cluster-7b6lh.kubeconfig       delete job service-interconnect-link-bootstrap       -n bookinfo --ignore-not-found
+```
+
+
+
 ### PostgreSQL or the link bootstrap reports a missing Secret
 
 The generated Secrets have two different lifecycle points:

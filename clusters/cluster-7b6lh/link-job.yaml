@@ -68,7 +68,7 @@ spec:
       serviceAccountName: service-interconnect-link-bootstrap
       containers:
       - name: create-token
-        image: registry.redhat.io/openshift4/ose-cli:v4.22
+        image: registry.redhat.io/openshift4/ose-cli-rhel9:v4.22
         imagePullPolicy: IfNotPresent
         command:
         - /bin/bash
