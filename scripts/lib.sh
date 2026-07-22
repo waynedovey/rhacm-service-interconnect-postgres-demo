@@ -174,20 +174,58 @@ get_cluster_kubeconfig() {
 
   rm -f "${temp_output}"
 
-  oc -n "${cluster}" extract "secret/${secret}" \
-    --keys=kubeconfig \
-    --to=- > "${temp_output}"
+  # Decode the Secret directly instead of using `oc extract --to=-`.
+  # Depending on the oc version, `oc extract` can emit an extraction header.
+  # Hive normally provides `kubeconfig`; `raw-kubeconfig` is used as a fallback.
+  oc -n "${cluster}" get secret "${secret}" -o json |
+    python3 -c '
+import base64
+import json
+import sys
+
+obj = json.load(sys.stdin)
+data = obj.get("data", {})
+
+value = data.get("kubeconfig") or data.get("raw-kubeconfig")
+if not value:
+    available = ", ".join(sorted(data.keys())) or "<none>"
+    print(
+        f"Secret does not contain kubeconfig or raw-kubeconfig. "
+        f"Available keys: {available}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+try:
+    decoded = base64.b64decode(value, validate=True)
+except Exception as exc:
+    print(f"Unable to decode kubeconfig Secret data: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+sys.stdout.buffer.write(decoded)
+' > "${temp_output}"
 
   chmod 600 "${temp_output}"
 
-  if ! head -n 5 "${temp_output}" | grep -q '^apiVersion:'; then
+  if [[ ! -s "${temp_output}" ]]; then
     rm -f "${temp_output}"
-    die "The extracted ${cluster} kubeconfig is not valid YAML"
+    die "The decoded ${cluster} kubeconfig is empty"
+  fi
+
+  if ! oc --kubeconfig "${temp_output}" config view --raw \
+    >/dev/null 2>&1; then
+    printf '[ERROR] First lines of the decoded kubeconfig:\n' >&2
+    sed -n '1,12p' "${temp_output}" >&2 || true
+    rm -f "${temp_output}"
+    die "The decoded ${cluster} kubeconfig is not a valid kubeconfig"
   fi
 
   if ! oc --kubeconfig "${temp_output}" whoami >/dev/null 2>&1; then
+    printf '[INFO] API endpoint from decoded kubeconfig:\n' >&2
+    oc --kubeconfig "${temp_output}" config view \
+      -o jsonpath='{.clusters[0].cluster.server}{"\n"}' >&2 || true
     rm -f "${temp_output}"
-    die "The extracted ${cluster} kubeconfig cannot authenticate to the cluster"
+    die "The decoded ${cluster} kubeconfig cannot authenticate to the cluster"
   fi
 
   mv "${temp_output}" "${output}"

@@ -285,6 +285,40 @@ scripts/                              Bootstrap helpers and tests
 
 ## Troubleshooting
 
+### `The extracted kubeconfig is not valid YAML`
+
+Older repository versions used:
+
+```bash
+oc extract secret/NAME --keys=kubeconfig --to=-
+```
+
+Some `oc` versions emit an extraction header, which made the repository's
+old first-line validation fail even when the Hive Secret was correct.
+
+The corrected script reads the Secret as JSON and base64-decodes either:
+
+```text
+data.kubeconfig
+data.raw-kubeconfig
+```
+
+It then validates the file with:
+
+```bash
+oc --kubeconfig FILE config view --raw
+oc --kubeconfig FILE whoami
+```
+
+Remove any failed temporary files before retrying:
+
+```bash
+rm -f .work/kubeconfigs/*.kubeconfig
+rm -f .work/kubeconfigs/*.tmp
+rm -rf .work/bootstrap.lock
+```
+
+
 ### Bootstrap stops at `Retrieving Hive admin kubeconfigs`
 
 First make sure only one bootstrap process is running:
