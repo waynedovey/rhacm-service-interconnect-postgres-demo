@@ -102,28 +102,100 @@ show_placement_decisions() {
 get_cluster_kubeconfig() {
   local cluster="$1"
   local output="${KUBECONFIG_DIR}/${cluster}.kubeconfig"
-  local secret="${cluster}-admin-kubeconfig"
+  local temp_output="${output}.tmp"
+  local secret=""
+  local start now last_message=0
 
+  # Reuse only a kubeconfig that is both syntactically plausible and usable.
   if [[ -s "${output}" ]]; then
-    printf '%s\n' "${output}"
-    return 0
+    if head -n 5 "${output}" | grep -q '^apiVersion:' &&
+       oc --kubeconfig "${output}" whoami >/dev/null 2>&1; then
+      printf '%s
+' "${output}"
+      return 0
+    fi
+
+    warn "Removing invalid cached kubeconfig: ${output}"
+    rm -f "${output}"
   fi
 
-  wait_until \
-    "Hive admin kubeconfig for ${cluster}" \
-    1800 \
-    oc -n "${cluster}" get secret "${secret}" >&2
+  printf '[INFO] Discovering Hive admin kubeconfig for %s
+' \
+    "${cluster}" >&2
 
-  oc -n "${cluster}" get secret "${secret}" -o json |
-    python3 -c '
-import base64, json, sys
-obj=json.load(sys.stdin)
-value=obj["data"]["kubeconfig"]
-sys.stdout.buffer.write(base64.b64decode(value))
-' > "${output}"
+  start="$(date +%s)"
 
-  chmod 600 "${output}"
-  printf '%s\n' "${output}"
+  while true; do
+    # Hive records the real Secret name here after installation.
+    secret="$(
+      oc -n "${cluster}" get clusterdeployment "${cluster}" \
+        -o jsonpath='{.spec.clusterMetadata.adminKubeconfigSecretRef.name}' \
+        2>/dev/null || true
+    )"
+
+    if [[ -n "${secret}" ]] &&
+       oc -n "${cluster}" get secret "${secret}" >/dev/null 2>&1; then
+      break
+    fi
+
+    now="$(date +%s)"
+    if (( now - start >= 1800 )); then
+      printf '
+[ERROR] Timed out waiting for Hive admin kubeconfig for %s.
+' \
+        "${cluster}" >&2
+      printf '[INFO] ClusterDeployment status:
+' >&2
+      oc -n "${cluster}" get clusterdeployment "${cluster}" -o yaml >&2 || true
+      printf '[INFO] Kubeconfig-related Secrets:
+' >&2
+      oc -n "${cluster}" get secrets |
+        grep -Ei 'kubeconfig|admin' >&2 || true
+      return 1
+    fi
+
+    if (( now - last_message >= 30 )); then
+      printf '[INFO] %s: waiting for ClusterDeployment adminKubeconfigSecretRef' \
+        "${cluster}" >&2
+      if [[ -n "${secret}" ]]; then
+        printf ' (referenced Secret: %s)' "${secret}" >&2
+      fi
+      printf '
+' >&2
+      last_message="${now}"
+    fi
+
+    sleep 10
+  done
+
+  printf '[INFO] %s: extracting Secret %s
+' \
+    "${cluster}" "${secret}" >&2
+
+  rm -f "${temp_output}"
+
+  oc -n "${cluster}" extract "secret/${secret}" \
+    --keys=kubeconfig \
+    --to=- > "${temp_output}"
+
+  chmod 600 "${temp_output}"
+
+  if ! head -n 5 "${temp_output}" | grep -q '^apiVersion:'; then
+    rm -f "${temp_output}"
+    die "The extracted ${cluster} kubeconfig is not valid YAML"
+  fi
+
+  if ! oc --kubeconfig "${temp_output}" whoami >/dev/null 2>&1; then
+    rm -f "${temp_output}"
+    die "The extracted ${cluster} kubeconfig cannot authenticate to the cluster"
+  fi
+
+  mv "${temp_output}" "${output}"
+
+  printf '[OK] %s admin kubeconfig is usable
+' "${cluster}" >&2
+  printf '%s
+' "${output}"
 }
 
 site_oc() {

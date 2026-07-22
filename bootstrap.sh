@@ -40,6 +40,31 @@ done
   die "--repo-url is required"
 }
 
+BOOTSTRAP_LOCK="${WORK_DIR}/bootstrap.lock"
+
+if ! mkdir "${BOOTSTRAP_LOCK}" 2>/dev/null; then
+  EXISTING_PID="$(
+    cat "${BOOTSTRAP_LOCK}/pid" 2>/dev/null || true
+  )"
+
+  if [[ -n "${EXISTING_PID}" ]] &&
+     kill -0 "${EXISTING_PID}" 2>/dev/null; then
+    die "Another bootstrap process is already running with PID ${EXISTING_PID}"
+  fi
+
+  warn "Removing stale bootstrap lock"
+  rm -rf "${BOOTSTRAP_LOCK}"
+  mkdir "${BOOTSTRAP_LOCK}"
+fi
+
+printf '%s\n' "$$" > "${BOOTSTRAP_LOCK}/pid"
+
+remove_bootstrap_lock() {
+  rm -rf "${BOOTSTRAP_LOCK}"
+}
+
+trap remove_bootstrap_lock EXIT INT TERM
+
 for cmd in oc python3 openssl; do
   require_cmd "${cmd}"
 done
@@ -101,6 +126,13 @@ wait_until "openshift-gitops namespace" 1800 \
 
 log "Creating RHACM GitOps placement and registration"
 oc apply -f "${ROOT_DIR}/hub/gitops/base.yaml"
+
+wait_until "GitOps placement selects ${SITE_A_CLUSTER}" 600 \
+  placement_has_cluster openshift-gitops si-demo-clusters "${SITE_A_CLUSTER}"
+wait_until "GitOps placement selects ${SITE_B_CLUSTER}" 600 \
+  placement_has_cluster openshift-gitops si-demo-clusters "${SITE_B_CLUSTER}"
+
+show_placement_decisions openshift-gitops
 
 rendered_appset="${WORK_DIR}/applicationset.yaml"
 python3 - "${ROOT_DIR}/hub/gitops/applicationset.yaml.tpl" \

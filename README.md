@@ -285,6 +285,45 @@ scripts/                              Bootstrap helpers and tests
 
 ## Troubleshooting
 
+### Bootstrap stops at `Retrieving Hive admin kubeconfigs`
+
+First make sure only one bootstrap process is running:
+
+```bash
+pgrep -fl 'bootstrap.sh'
+```
+
+Stop older copies before starting another run.
+
+Hive does not guarantee that the admin kubeconfig Secret has a fixed name. The
+bootstrap reads the authoritative Secret reference from:
+
+```text
+ClusterDeployment.spec.clusterMetadata.adminKubeconfigSecretRef.name
+```
+
+Inspect it manually:
+
+```bash
+for cluster in cluster-pwv6d cluster-7b6lh
+do
+  echo "=== ${cluster} ==="
+  oc -n "${cluster}" get clusterdeployment "${cluster}" \
+    -o jsonpath='{.spec.clusterMetadata.adminKubeconfigSecretRef.name}{"\n"}'
+done
+```
+
+Remove old cached files if they contain log output or are not usable
+kubeconfigs:
+
+```bash
+rm -f .work/kubeconfigs/*.kubeconfig
+```
+
+The corrected bootstrap validates each cached kubeconfig before reusing it and
+prevents two bootstrap processes from running concurrently.
+
+
 ### Placements show `No status`
 
 A `Placement` can only select clusters from a `ManagedClusterSet` that is bound
