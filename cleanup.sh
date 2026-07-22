@@ -24,7 +24,9 @@ for cluster in "${SITE_A_CLUSTER}" "${SITE_B_CLUSTER}"; do
   if [[ -f "${KUBECONFIG_DIR}/${cluster}.kubeconfig" ]]; then
     log "Removing demo namespaces from ${cluster}"
     site_oc "${cluster}" delete namespace bookinfo vault-demo \
-      --ignore-not-found --wait=false
+      --ignore-not-found \
+      --wait=true \
+      --timeout=10m
   else
     warn "No cached kubeconfig for ${cluster}; skipping managed-cluster namespace deletion"
   fi

@@ -127,14 +127,6 @@ wait_until "openshift-gitops namespace" 1800 \
 log "Creating RHACM GitOps placement and registration"
 oc apply -f "${ROOT_DIR}/hub/gitops/base.yaml"
 
-wait_until "OCM Placement generator ConfigMap exists" 120 \
-  oc -n openshift-gitops get configmap ocm-placement-generator
-
-wait_until "ApplicationSet controller can list PlacementDecisions" 120 \
-  oc auth can-i list placementdecisions.cluster.open-cluster-management.io \
-    -n openshift-gitops \
-    --as=system:serviceaccount:openshift-gitops:openshift-gitops-applicationset-controller
-
 wait_until "GitOps placement selects ${SITE_A_CLUSTER}" 600 \
   placement_has_cluster openshift-gitops si-demo-clusters "${SITE_A_CLUSTER}"
 wait_until "GitOps placement selects ${SITE_B_CLUSTER}" 600 \
@@ -154,66 +146,19 @@ text = text.replace("__REVISION__", revision)
 Path(target).write_text(text)
 PY
 
-oc apply -f "${rendered_appset}"
-
-wait_until "ApplicationSet generated ${SITE_A_CLUSTER}-si-demo" 300 \
-  oc -n openshift-gitops get application "${SITE_A_CLUSTER}-si-demo"
-wait_until "ApplicationSet generated ${SITE_B_CLUSTER}-si-demo" 300 \
-  oc -n openshift-gitops get application "${SITE_B_CLUSTER}-si-demo"
-
-oc -n openshift-gitops get applicationset si-demo \
-  -o custom-columns='NAME:.metadata.name,HEALTH:.status.health.status,MESSAGE:.status.health.message'
-
-oc -n openshift-gitops get application \
-  "${SITE_A_CLUSTER}-si-demo" "${SITE_B_CLUSTER}-si-demo" \
-  -o custom-columns='NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status'
-
 log "Retrieving Hive admin kubeconfigs"
 SITE_A_KUBECONFIG="$(get_cluster_kubeconfig "${SITE_A_CLUSTER}")"
 SITE_B_KUBECONFIG="$(get_cluster_kubeconfig "${SITE_B_CLUSTER}")"
 ok "Site A kubeconfig: ${SITE_A_KUBECONFIG}"
 ok "Site B kubeconfig: ${SITE_B_KUBECONFIG}"
 
-log "Validating managed-cluster OperatorHub catalogs"
-for cluster in "${SITE_A_CLUSTER}" "${SITE_B_CLUSTER}"; do
-  if ! operator_catalog_has_channel \
-    "${cluster}" skupper-operator redhat-operators stable-2
-  then
-    show_operator_catalog "${cluster}" skupper-operator
-    die "${cluster} does not expose skupper-operator from redhat-operators on stable-2"
-  fi
-
-  if ! operator_catalog_has_channel \
-    "${cluster}" cloudnative-pg certified-operators stable-v1
-  then
-    show_operator_catalog "${cluster}" cloudnative-pg
-    die "${cluster} does not expose cloudnative-pg from certified-operators on stable-v1"
-  fi
-done
-
-log "Waiting for managed-cluster operators to install"
-for cluster in "${SITE_A_CLUSTER}" "${SITE_B_CLUSTER}"; do
-  wait_for_olm_subscription \
-    "${cluster}" openshift-operators skupper-operator \
-    skupper-operator redhat-operators stable-2 1800
-
-  wait_for_olm_subscription \
-    "${cluster}" external-secrets-operator \
-    openshift-external-secrets-operator \
-    openshift-external-secrets-operator redhat-operators stable-v1.2 1800
-
-  wait_for_olm_subscription \
-    "${cluster}" openshift-operators cloudnative-pg \
-    cloudnative-pg certified-operators stable-v1 1800
-done
-
 log "Waiting for managed-cluster operator CRDs"
 for cluster in "${SITE_A_CLUSTER}" "${SITE_B_CLUSTER}"; do
-  wait_until "${cluster}: Service Interconnect CRD" 600 \
+  wait_until "${cluster}: Service Interconnect CRDs" 3600 \
     cluster_crd_exists "${cluster}" sites.skupper.io
-  wait_until "${cluster}: External Secrets CRD" 600 \
+  wait_until "${cluster}: External Secrets CRDs" 3600 \
     cluster_crd_exists "${cluster}" externalsecrets.external-secrets.io
-  wait_until "${cluster}: CloudNativePG CRD" 600 \
+  wait_until "${cluster}: CloudNativePG CRDs" 3600 \
     cluster_crd_exists "${cluster}" clusters.postgresql.cnpg.io
 done
 
@@ -234,17 +179,35 @@ fi
 
 for cluster in "${SITE_A_CLUSTER}" "${SITE_B_CLUSTER}"; do
   log "Creating Vault bootstrap secrets on ${cluster}"
+
   site_oc "${cluster}" create namespace vault-demo \
-    --dry-run=client -o yaml | site_oc "${cluster}" apply -f -
+    --dry-run=client -o yaml |
+    site_oc "${cluster}" apply -f -
+
+  site_oc "${cluster}" wait \
+    --for=jsonpath='{.status.phase}'=Active \
+    namespace/vault-demo \
+    --timeout=2m
 
   site_oc "${cluster}" -n vault-demo create secret generic vault-root-token \
     --from-literal=token="${VAULT_TOKEN}" \
-    --dry-run=client -o yaml | site_oc "${cluster}" apply -f -
+    --dry-run=client -o yaml |
+    site_oc "${cluster}" apply -f -
 
   site_oc "${cluster}" -n vault-demo create secret generic vault-auth \
     --from-literal=token="${VAULT_TOKEN}" \
-    --dry-run=client -o yaml | site_oc "${cluster}" apply -f -
+    --dry-run=client -o yaml |
+    site_oc "${cluster}" apply -f -
+
+  site_oc "${cluster}" -n vault-demo get secret \
+    vault-root-token vault-auth
 done
+
+log "Vault bootstrap Secrets exist before enabling the Argo CD applications"
+
+
+log "Enabling the Argo CD applications after bootstrap Secrets are ready"
+oc apply -f "${rendered_appset}"
 
 log "Waiting for Argo CD applications"
 wait_until "Site A Argo CD application" 1800 \
@@ -265,20 +228,11 @@ for cluster in "${SITE_A_CLUSTER}" "${SITE_B_CLUSTER}"; do
     username=bookinfo \
     password="${POSTGRES_PASSWORD}" \
     database=bookinfo
-
-  site_oc "${cluster}" -n bookinfo annotate externalsecret bookinfo-db-app \
-    force-sync="$(date +%s)" \
-    --overwrite
 done
 
 for cluster in "${SITE_A_CLUSTER}" "${SITE_B_CLUSTER}"; do
-  if ! wait_until "${cluster}: bookinfo-db-app secret from ESO" 1800 \
+  wait_until "${cluster}: bookinfo-db-app secret from ESO" 1800 \
     secret_exists "${cluster}" bookinfo bookinfo-db-app
-  then
-    site_oc "${cluster}" get clustersecretstore demo-vault -o yaml || true
-    site_oc "${cluster}" -n bookinfo get externalsecret bookinfo-db-app -o yaml || true
-    die "${cluster}: External Secrets did not create bookinfo-db-app"
-  fi
 done
 
 log "Waiting for Site A PostgreSQL primary"

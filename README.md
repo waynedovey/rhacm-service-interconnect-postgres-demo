@@ -286,6 +286,40 @@ scripts/                              Bootstrap helpers and tests
 ## Troubleshooting
 
 
+### Vault reports `secret "vault-root-token" not found`
+
+`vault-root-token` and `vault-auth` are bootstrap Secrets generated locally;
+they are deliberately not committed to Git. A clean installation must create
+them before the Argo CD `ApplicationSet` is enabled.
+
+The corrected bootstrap sequence is:
+
+```text
+retrieve managed-cluster kubeconfigs
+  -> wait for operator CRDs
+  -> generate .work/demo.env
+  -> create vault-demo/vault-root-token and vault-demo/vault-auth
+  -> apply the ApplicationSet
+  -> deploy Vault
+```
+
+Verify the Secrets:
+
+```bash
+for cluster in cluster-pwv6d cluster-7b6lh
+do
+  oc --kubeconfig ".work/kubeconfigs/${cluster}.kubeconfig" \
+    get secret vault-root-token vault-auth \
+    -n vault-demo
+done
+```
+
+The cleanup script now waits for `bookinfo` and `vault-demo` to be fully
+deleted before removing `.work`, preventing an immediate redeployment from
+racing namespaces that are still terminating.
+
+
+
 ### Wait or link Job fails to pull `openshift4/ose-cli:v4.22`
 
 OpenShift 4.13 and later use RHEL 9 component images. The CLI image used by
