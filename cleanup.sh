@@ -11,7 +11,7 @@ if [[ "${1:-}" == "--remove-operators" ]]; then
 fi
 
 log "Removing ApplicationSet and GitOps registration"
-oc -n openshift-gitops delete applicationset si-demo \
+oc -n openshift-gitops delete applicationsets.argoproj.io si-demo \
   --ignore-not-found
 oc -n openshift-gitops delete gitopscluster si-demo \
   --ignore-not-found

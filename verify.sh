@@ -19,7 +19,8 @@ oc auth can-i list placementdecisions.cluster.open-cluster-management.io \
   --as=system:serviceaccount:openshift-gitops:openshift-gitops-applicationset-controller
 
 log "Argo CD applications"
-oc get applicationset,application -n openshift-gitops
+oc get applicationsets.argoproj.io -n openshift-gitops
+oc get applications.argoproj.io -n openshift-gitops
 
 for cluster in "${SITE_A_CLUSTER}" "${SITE_B_CLUSTER}"; do
   log "${cluster}: operators"

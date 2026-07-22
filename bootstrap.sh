@@ -211,9 +211,9 @@ oc apply -f "${rendered_appset}"
 
 log "Waiting for Argo CD applications"
 wait_until "Site A Argo CD application" 1800 \
-  oc -n openshift-gitops get application "${SITE_A_CLUSTER}-si-demo"
+  oc -n openshift-gitops get applications.argoproj.io "${SITE_A_CLUSTER}-si-demo"
 wait_until "Site B Argo CD application" 1800 \
-  oc -n openshift-gitops get application "${SITE_B_CLUSTER}-si-demo"
+  oc -n openshift-gitops get applications.argoproj.io "${SITE_B_CLUSTER}-si-demo"
 
 log "Waiting for demo Vault on both clusters"
 for cluster in "${SITE_A_CLUSTER}" "${SITE_B_CLUSTER}"; do
