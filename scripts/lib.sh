@@ -106,12 +106,10 @@ get_cluster_kubeconfig() {
   local secret=""
   local start now last_message=0
 
-  # Reuse only a kubeconfig that is both syntactically plausible and usable.
   if [[ -s "${output}" ]]; then
     if oc --kubeconfig "${output}" config view --raw >/dev/null 2>&1 &&
        oc --kubeconfig "${output}" whoami >/dev/null 2>&1; then
-      printf '%s
-' "${output}"
+      printf '%s\n' "${output}"
       return 0
     fi
 
@@ -119,14 +117,12 @@ get_cluster_kubeconfig() {
     rm -f "${output}"
   fi
 
-  printf '[INFO] Discovering Hive admin kubeconfig for %s
-' \
+  printf '[INFO] Discovering Hive admin kubeconfig for %s\n' \
     "${cluster}" >&2
 
   start="$(date +%s)"
 
   while true; do
-    # Hive records the real Secret name here after installation.
     secret="$(
       oc -n "${cluster}" get clusterdeployment "${cluster}" \
         -o jsonpath='{.spec.clusterMetadata.adminKubeconfigSecretRef.name}' \
@@ -140,36 +136,28 @@ get_cluster_kubeconfig() {
 
     now="$(date +%s)"
     if (( now - start >= 1800 )); then
-      printf '
-[ERROR] Timed out waiting for Hive admin kubeconfig for %s.
-' \
+      printf '[ERROR] Timed out waiting for Hive admin kubeconfig for %s.\n' \
         "${cluster}" >&2
-      printf '[INFO] ClusterDeployment status:
-' >&2
       oc -n "${cluster}" get clusterdeployment "${cluster}" -o yaml >&2 || true
-      printf '[INFO] Kubeconfig-related Secrets:
-' >&2
       oc -n "${cluster}" get secrets |
         grep -Ei 'kubeconfig|admin' >&2 || true
       return 1
     fi
 
     if (( now - last_message >= 30 )); then
-      printf '[INFO] %s: waiting for ClusterDeployment adminKubeconfigSecretRef' \
+      printf '[INFO] %s: waiting for Hive admin kubeconfig Secret' \
         "${cluster}" >&2
       if [[ -n "${secret}" ]]; then
-        printf ' (referenced Secret: %s)' "${secret}" >&2
+        printf ' (%s)' "${secret}" >&2
       fi
-      printf '
-' >&2
+      printf '\n' >&2
       last_message="${now}"
     fi
 
     sleep 10
   done
 
-  printf '[INFO] %s: extracting Secret %s
-' \
+  printf '[INFO] %s: decoding Secret %s\n' \
     "${cluster}" "${secret}" >&2
 
   rm -f "${temp_output}"
@@ -182,39 +170,47 @@ import sys
 
 obj = json.load(sys.stdin)
 data = obj.get("data", {})
-value = data.get("kubeconfig") or data.get("raw-kubeconfig")
+encoded = data.get("kubeconfig") or data.get("raw-kubeconfig")
 
-if not value:
-    available = ", ".join(sorted(data.keys())) or "<none>"
+if not encoded:
+    keys = ", ".join(sorted(data)) or "<none>"
     print(
-        f"Secret contains neither kubeconfig nor raw-kubeconfig. "
-        f"Available keys: {available}",
+        "Secret contains neither kubeconfig nor raw-kubeconfig. "
+        f"Available keys: {keys}",
         file=sys.stderr,
     )
     raise SystemExit(1)
 
-sys.stdout.buffer.write(base64.b64decode(value, validate=True))
+try:
+    decoded = base64.b64decode(encoded, validate=True)
+except Exception as exc:
+    print(f"Unable to decode kubeconfig: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+sys.stdout.buffer.write(decoded)
 ' > "${temp_output}"
 
   chmod 600 "${temp_output}"
 
   if [[ ! -s "${temp_output}" ]] ||
      ! oc --kubeconfig "${temp_output}" config view --raw >/dev/null 2>&1; then
+    printf '[ERROR] The decoded kubeconfig is invalid. First lines:\n' >&2
+    sed -n '1,12p' "${temp_output}" >&2 || true
     rm -f "${temp_output}"
-    die "The decoded ${cluster} admin kubeconfig is invalid"
+    return 1
   fi
 
   if ! oc --kubeconfig "${temp_output}" whoami >/dev/null 2>&1; then
+    printf '[ERROR] The decoded kubeconfig cannot authenticate to %s.\n' \
+      "${cluster}" >&2
     rm -f "${temp_output}"
-    die "The decoded ${cluster} admin kubeconfig cannot authenticate"
+    return 1
   fi
 
   mv "${temp_output}" "${output}"
 
-  printf '[OK] %s admin kubeconfig is usable
-' "${cluster}" >&2
-  printf '%s
-' "${output}"
+  printf '[OK] %s admin kubeconfig is usable\n' "${cluster}" >&2
+  printf '%s\n' "${output}"
 }
 
 site_oc() {
@@ -229,185 +225,6 @@ cluster_crd_exists() {
   local cluster="$1"
   local crd="$2"
   site_oc "${cluster}" get crd "${crd}"
-}
-
-operator_catalog_has_channel() {
-  local cluster="$1"
-  local package="$2"
-  local source="$3"
-  local channel="$4"
-
-  site_oc "${cluster}" -n openshift-marketplace \
-    get packagemanifest "${package}" -o json 2>/dev/null |
-    python3 -c '
-import json
-import sys
-
-source = sys.argv[1]
-channel = sys.argv[2]
-obj = json.load(sys.stdin)
-status = obj.get("status", {})
-
-if status.get("catalogSource") != source:
-    raise SystemExit(1)
-
-channels = {
-    entry.get("name")
-    for entry in status.get("channels", [])
-}
-raise SystemExit(0 if channel in channels else 1)
-' "${source}" "${channel}"
-}
-
-show_operator_catalog() {
-  local cluster="$1"
-  local package="$2"
-
-  site_oc "${cluster}" -n openshift-marketplace \
-    get packagemanifest "${package}" \
-    -o json 2>/dev/null |
-    python3 -c '
-import json
-import sys
-
-obj = json.load(sys.stdin)
-status = obj.get("status", {})
-channels = [
-    entry.get("name")
-    for entry in status.get("channels", [])
-    if entry.get("name")
-]
-
-print(
-    "package={package} source={source} defaultChannel={default} channels={channels}".format(
-        package=obj.get("metadata", {}).get("name", "<unknown>"),
-        source=status.get("catalogSource", "<unknown>"),
-        default=status.get("defaultChannel", "<none>"),
-        channels=",".join(channels) or "<none>",
-    )
-)
-' || true
-}
-
-wait_for_olm_subscription() {
-  local cluster="$1"
-  local namespace="$2"
-  local subscription="$3"
-  local expected_package="$4"
-  local expected_source="$5"
-  local expected_channel="$6"
-  local timeout_seconds="${7:-1800}"
-
-  local start now last_message=0
-  local actual_package=""
-  local actual_source=""
-  local actual_channel=""
-  local installed_csv=""
-  local current_csv=""
-  local state=""
-
-  start="$(date +%s)"
-
-  while true; do
-    if site_oc "${cluster}" -n "${namespace}" \
-      get subscriptions.operators.coreos.com "${subscription}" \
-      >/dev/null 2>&1
-    then
-      actual_package="$(
-        site_oc "${cluster}" -n "${namespace}" \
-          get subscriptions.operators.coreos.com "${subscription}" \
-          -o jsonpath='{.spec.name}'
-      )"
-      actual_source="$(
-        site_oc "${cluster}" -n "${namespace}" \
-          get subscriptions.operators.coreos.com "${subscription}" \
-          -o jsonpath='{.spec.source}'
-      )"
-      actual_channel="$(
-        site_oc "${cluster}" -n "${namespace}" \
-          get subscriptions.operators.coreos.com "${subscription}" \
-          -o jsonpath='{.spec.channel}'
-      )"
-      installed_csv="$(
-        site_oc "${cluster}" -n "${namespace}" \
-          get subscriptions.operators.coreos.com "${subscription}" \
-          -o jsonpath='{.status.installedCSV}'
-      )"
-      current_csv="$(
-        site_oc "${cluster}" -n "${namespace}" \
-          get subscriptions.operators.coreos.com "${subscription}" \
-          -o jsonpath='{.status.currentCSV}'
-      )"
-      state="$(
-        site_oc "${cluster}" -n "${namespace}" \
-          get subscriptions.operators.coreos.com "${subscription}" \
-          -o jsonpath='{.status.state}'
-      )"
-
-      if [[ "${actual_package}" != "${expected_package}" ]] ||
-         [[ "${actual_source}" != "${expected_source}" ]] ||
-         [[ "${actual_channel}" != "${expected_channel}" ]]
-      then
-        printf '[ERROR] %s: Subscription %s has unexpected settings.\n' \
-          "${cluster}" "${subscription}" >&2
-        printf '  expected: package=%s source=%s channel=%s\n' \
-          "${expected_package}" "${expected_source}" "${expected_channel}" >&2
-        printf '  actual:   package=%s source=%s channel=%s\n' \
-          "${actual_package:-<none>}" \
-          "${actual_source:-<none>}" \
-          "${actual_channel:-<none>}" >&2
-        show_operator_catalog "${cluster}" "${expected_package}" >&2
-        return 1
-      fi
-
-      if [[ -n "${installed_csv}" ]]; then
-        if site_oc "${cluster}" -n "${namespace}" \
-          get clusterserviceversions.operators.coreos.com \
-          "${installed_csv}" \
-          -o jsonpath='{.status.phase}' 2>/dev/null |
-          grep -qx 'Succeeded'
-        then
-          ok "${cluster}: ${subscription} installed as ${installed_csv}"
-          return 0
-        fi
-      fi
-    fi
-
-    now="$(date +%s)"
-    if (( now - start >= timeout_seconds )); then
-      printf '[ERROR] Timed out waiting for OLM Subscription %s on %s.\n' \
-        "${subscription}" "${cluster}" >&2
-
-      site_oc "${cluster}" -n "${namespace}" \
-        get subscriptions.operators.coreos.com "${subscription}" \
-        -o yaml >&2 || true
-
-      site_oc "${cluster}" -n "${namespace}" \
-        get installplans.operators.coreos.com >&2 || true
-
-      show_operator_catalog "${cluster}" "${expected_package}" >&2
-      return 1
-    fi
-
-    if (( now - last_message >= 30 )); then
-      printf '[INFO] %s: waiting for %s (%s/%s)\n' \
-        "${cluster}" "${subscription}" \
-        "${expected_source}" "${expected_channel}" >&2
-      printf '  state=%s currentCSV=%s installedCSV=%s\n' \
-        "${state:-<none>}" \
-        "${current_csv:-<none>}" \
-        "${installed_csv:-<none>}" >&2
-
-      site_oc "${cluster}" -n "${namespace}" \
-        get subscriptions.operators.coreos.com "${subscription}" \
-        -o jsonpath='{range .status.conditions[*]}  condition type={.type} status={.status} reason={.reason} message={.message}{"\\n"}{end}' \
-        >&2 || true
-
-      last_message="${now}"
-    fi
-
-    sleep 10
-  done
 }
 
 secret_exists() {
