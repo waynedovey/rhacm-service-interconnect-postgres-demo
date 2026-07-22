@@ -106,10 +106,12 @@ get_cluster_kubeconfig() {
   local secret=""
   local start now last_message=0
 
+  # Reuse only a kubeconfig that parses and authenticates successfully.
   if [[ -s "${output}" ]]; then
     if oc --kubeconfig "${output}" config view --raw >/dev/null 2>&1 &&
        oc --kubeconfig "${output}" whoami >/dev/null 2>&1; then
-      printf '%s\n' "${output}"
+      printf '%s
+' "${output}"
       return 0
     fi
 
@@ -117,7 +119,8 @@ get_cluster_kubeconfig() {
     rm -f "${output}"
   fi
 
-  printf '[INFO] Discovering Hive admin kubeconfig for %s\n' \
+  printf '[INFO] Discovering Hive admin kubeconfig for %s
+' \
     "${cluster}" >&2
 
   start="$(date +%s)"
@@ -136,7 +139,8 @@ get_cluster_kubeconfig() {
 
     now="$(date +%s)"
     if (( now - start >= 1800 )); then
-      printf '[ERROR] Timed out waiting for Hive admin kubeconfig for %s.\n' \
+      printf '[ERROR] Timed out waiting for Hive admin kubeconfig for %s.
+' \
         "${cluster}" >&2
       oc -n "${cluster}" get clusterdeployment "${cluster}" -o yaml >&2 || true
       oc -n "${cluster}" get secrets |
@@ -150,18 +154,22 @@ get_cluster_kubeconfig() {
       if [[ -n "${secret}" ]]; then
         printf ' (%s)' "${secret}" >&2
       fi
-      printf '\n' >&2
+      printf '
+' >&2
       last_message="${now}"
     fi
 
     sleep 10
   done
 
-  printf '[INFO] %s: decoding Secret %s\n' \
+  printf '[INFO] %s: decoding Secret %s
+' \
     "${cluster}" "${secret}" >&2
 
   rm -f "${temp_output}"
 
+  # Decode Secret data directly. Do not use `oc extract --to=-`, because some
+  # oc versions emit a "# kubeconfig" header on stdout.
   oc -n "${cluster}" get secret "${secret}" -o json |
     python3 -c '
 import base64
@@ -194,14 +202,16 @@ sys.stdout.buffer.write(decoded)
 
   if [[ ! -s "${temp_output}" ]] ||
      ! oc --kubeconfig "${temp_output}" config view --raw >/dev/null 2>&1; then
-    printf '[ERROR] The decoded kubeconfig is invalid. First lines:\n' >&2
+    printf '[ERROR] The decoded kubeconfig is invalid. First lines:
+' >&2
     sed -n '1,12p' "${temp_output}" >&2 || true
     rm -f "${temp_output}"
     return 1
   fi
 
   if ! oc --kubeconfig "${temp_output}" whoami >/dev/null 2>&1; then
-    printf '[ERROR] The decoded kubeconfig cannot authenticate to %s.\n' \
+    printf '[ERROR] The decoded kubeconfig cannot authenticate to %s.
+' \
       "${cluster}" >&2
     rm -f "${temp_output}"
     return 1
@@ -209,8 +219,10 @@ sys.stdout.buffer.write(decoded)
 
   mv "${temp_output}" "${output}"
 
-  printf '[OK] %s admin kubeconfig is usable\n' "${cluster}" >&2
-  printf '%s\n' "${output}"
+  printf '[OK] %s admin kubeconfig is usable
+' "${cluster}" >&2
+  printf '%s
+' "${output}"
 }
 
 site_oc() {
