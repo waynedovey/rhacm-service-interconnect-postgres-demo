@@ -148,6 +148,15 @@ Generated credentials are written to:
 
 Protect this file. It is excluded by `.gitignore`.
 
+## Local repository validation
+
+```bash
+./scripts/validate.sh
+```
+
+The first run creates `.work/validate-venv` and installs PyYAML inside that local
+virtual environment. It does not modify the macOS system Python.
+
 ## Verify the deployment
 
 ```bash
