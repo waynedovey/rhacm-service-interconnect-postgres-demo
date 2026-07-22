@@ -286,6 +286,43 @@ scripts/                              Bootstrap helpers and tests
 ## Troubleshooting
 
 
+### PostgreSQL or the link bootstrap reports a missing Secret
+
+The generated Secrets have two different lifecycle points:
+
+- `bookinfo-db-app` is created by External Secrets after the bootstrap seeds
+  `secret/bookinfo/app` in Vault.
+- `service-interconnect-token-ca` and
+  `service-interconnect-token-metadata` are created later, after Site A issues
+  an `AccessGrant` and the bootstrap stores the token fields in Site B Vault.
+
+The repository uses an Argo CD Sync hook to wait for `bookinfo-db-app` before
+deploying CloudNativePG. The Site B link bootstrap Job does not mount its token
+Secret; it starts normally and polls the Kubernetes API until External Secrets
+creates the token data.
+
+Check External Secrets:
+
+```bash
+for cluster in cluster-pwv6d cluster-7b6lh
+do
+  kubeconfig=".work/kubeconfigs/${cluster}.kubeconfig"
+
+  echo "=== ${cluster} ==="
+
+  oc --kubeconfig "${kubeconfig}"     get clustersecretstore demo-vault
+
+  oc --kubeconfig "${kubeconfig}"     get externalsecret -n bookinfo
+
+  oc --kubeconfig "${kubeconfig}"     describe externalsecret bookinfo-db-app -n bookinfo
+done
+```
+
+An `ExternalSecret` is ready only after its target Secret exists and has been
+successfully refreshed.
+
+
+
 ### Vault pod fails with `unable to set CAP_SETFCAP effective capability`
 
 The HashiCorp Vault container entrypoint tries to set `cap_ipc_lock` on the

@@ -265,11 +265,20 @@ for cluster in "${SITE_A_CLUSTER}" "${SITE_B_CLUSTER}"; do
     username=bookinfo \
     password="${POSTGRES_PASSWORD}" \
     database=bookinfo
+
+  site_oc "${cluster}" -n bookinfo annotate externalsecret bookinfo-db-app \
+    force-sync="$(date +%s)" \
+    --overwrite
 done
 
 for cluster in "${SITE_A_CLUSTER}" "${SITE_B_CLUSTER}"; do
-  wait_until "${cluster}: bookinfo-db-app secret from ESO" 1800 \
+  if ! wait_until "${cluster}: bookinfo-db-app secret from ESO" 1800 \
     secret_exists "${cluster}" bookinfo bookinfo-db-app
+  then
+    site_oc "${cluster}" get clustersecretstore demo-vault -o yaml || true
+    site_oc "${cluster}" -n bookinfo get externalsecret bookinfo-db-app -o yaml || true
+    die "${cluster}: External Secrets did not create bookinfo-db-app"
+  fi
 done
 
 log "Waiting for Site A PostgreSQL primary"
