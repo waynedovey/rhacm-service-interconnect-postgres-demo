@@ -154,13 +154,46 @@ SITE_B_KUBECONFIG="$(get_cluster_kubeconfig "${SITE_B_CLUSTER}")"
 ok "Site A kubeconfig: ${SITE_A_KUBECONFIG}"
 ok "Site B kubeconfig: ${SITE_B_KUBECONFIG}"
 
+log "Validating managed-cluster OperatorHub catalogs"
+for cluster in "${SITE_A_CLUSTER}" "${SITE_B_CLUSTER}"; do
+  if ! operator_catalog_has_channel \
+    "${cluster}" skupper-operator redhat-operators stable-2
+  then
+    show_operator_catalog "${cluster}" skupper-operator
+    die "${cluster} does not expose skupper-operator from redhat-operators on stable-2"
+  fi
+
+  if ! operator_catalog_has_channel \
+    "${cluster}" cloudnative-pg certified-operators stable-v1
+  then
+    show_operator_catalog "${cluster}" cloudnative-pg
+    die "${cluster} does not expose cloudnative-pg from certified-operators on stable-v1"
+  fi
+done
+
+log "Waiting for managed-cluster operators to install"
+for cluster in "${SITE_A_CLUSTER}" "${SITE_B_CLUSTER}"; do
+  wait_for_olm_subscription \
+    "${cluster}" openshift-operators skupper-operator \
+    skupper-operator redhat-operators stable-2 1800
+
+  wait_for_olm_subscription \
+    "${cluster}" external-secrets-operator \
+    openshift-external-secrets-operator \
+    openshift-external-secrets-operator redhat-operators stable-v1.2 1800
+
+  wait_for_olm_subscription \
+    "${cluster}" openshift-operators cloudnative-pg \
+    cloudnative-pg certified-operators stable-v1 1800
+done
+
 log "Waiting for managed-cluster operator CRDs"
 for cluster in "${SITE_A_CLUSTER}" "${SITE_B_CLUSTER}"; do
-  wait_until "${cluster}: Service Interconnect CRDs" 3600 \
+  wait_until "${cluster}: Service Interconnect CRD" 600 \
     cluster_crd_exists "${cluster}" sites.skupper.io
-  wait_until "${cluster}: External Secrets CRDs" 3600 \
+  wait_until "${cluster}: External Secrets CRD" 600 \
     cluster_crd_exists "${cluster}" externalsecrets.external-secrets.io
-  wait_until "${cluster}: CloudNativePG CRDs" 3600 \
+  wait_until "${cluster}: CloudNativePG CRD" 600 \
     cluster_crd_exists "${cluster}" clusters.postgresql.cnpg.io
 done
 

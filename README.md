@@ -285,6 +285,31 @@ scripts/                              Bootstrap helpers and tests
 
 ## Troubleshooting
 
+### Service Interconnect and CloudNativePG Subscriptions never resolve
+
+The catalog values used by this environment are:
+
+| Operator | Package | Catalog source | Channel |
+|---|---|---|---|
+| Service Interconnect | `skupper-operator` | `redhat-operators` | `stable-2` |
+| External Secrets | `openshift-external-secrets-operator` | `redhat-operators` | `stable-v1.2` |
+| CloudNativePG | `cloudnative-pg` | `certified-operators` | `stable-v1` |
+
+A Subscription with no `status.currentCSV`, `status.installedCSV`, or InstallPlan
+has not resolved.
+
+Always use the full OLM resource name because the short name `subscription` can
+resolve to the RHACM application Subscription API:
+
+```bash
+oc get subscriptions.operators.coreos.com -A
+```
+
+Do not install **Red Hat Service Interconnect Network Observer** for this demo.
+It is a separate optional product. The required package is **Red Hat Service
+Interconnect**, package name `skupper-operator`.
+
+
 ### `The extracted kubeconfig is not valid YAML`
 
 Older repository versions used:

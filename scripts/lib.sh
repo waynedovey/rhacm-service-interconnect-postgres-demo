@@ -108,7 +108,7 @@ get_cluster_kubeconfig() {
 
   # Reuse only a kubeconfig that is both syntactically plausible and usable.
   if [[ -s "${output}" ]]; then
-    if head -n 5 "${output}" | grep -q '^apiVersion:' &&
+    if oc --kubeconfig "${output}" config view --raw >/dev/null 2>&1 &&
        oc --kubeconfig "${output}" whoami >/dev/null 2>&1; then
       printf '%s
 ' "${output}"
@@ -174,9 +174,6 @@ get_cluster_kubeconfig() {
 
   rm -f "${temp_output}"
 
-  # Decode the Secret directly instead of using `oc extract --to=-`.
-  # Depending on the oc version, `oc extract` can emit an extraction header.
-  # Hive normally provides `kubeconfig`; `raw-kubeconfig` is used as a fallback.
   oc -n "${cluster}" get secret "${secret}" -o json |
     python3 -c '
 import base64
@@ -185,47 +182,31 @@ import sys
 
 obj = json.load(sys.stdin)
 data = obj.get("data", {})
-
 value = data.get("kubeconfig") or data.get("raw-kubeconfig")
+
 if not value:
     available = ", ".join(sorted(data.keys())) or "<none>"
     print(
-        f"Secret does not contain kubeconfig or raw-kubeconfig. "
+        f"Secret contains neither kubeconfig nor raw-kubeconfig. "
         f"Available keys: {available}",
         file=sys.stderr,
     )
     raise SystemExit(1)
 
-try:
-    decoded = base64.b64decode(value, validate=True)
-except Exception as exc:
-    print(f"Unable to decode kubeconfig Secret data: {exc}", file=sys.stderr)
-    raise SystemExit(1)
-
-sys.stdout.buffer.write(decoded)
+sys.stdout.buffer.write(base64.b64decode(value, validate=True))
 ' > "${temp_output}"
 
   chmod 600 "${temp_output}"
 
-  if [[ ! -s "${temp_output}" ]]; then
+  if [[ ! -s "${temp_output}" ]] ||
+     ! oc --kubeconfig "${temp_output}" config view --raw >/dev/null 2>&1; then
     rm -f "${temp_output}"
-    die "The decoded ${cluster} kubeconfig is empty"
-  fi
-
-  if ! oc --kubeconfig "${temp_output}" config view --raw \
-    >/dev/null 2>&1; then
-    printf '[ERROR] First lines of the decoded kubeconfig:\n' >&2
-    sed -n '1,12p' "${temp_output}" >&2 || true
-    rm -f "${temp_output}"
-    die "The decoded ${cluster} kubeconfig is not a valid kubeconfig"
+    die "The decoded ${cluster} admin kubeconfig is invalid"
   fi
 
   if ! oc --kubeconfig "${temp_output}" whoami >/dev/null 2>&1; then
-    printf '[INFO] API endpoint from decoded kubeconfig:\n' >&2
-    oc --kubeconfig "${temp_output}" config view \
-      -o jsonpath='{.clusters[0].cluster.server}{"\n"}' >&2 || true
     rm -f "${temp_output}"
-    die "The decoded ${cluster} kubeconfig cannot authenticate to the cluster"
+    die "The decoded ${cluster} admin kubeconfig cannot authenticate"
   fi
 
   mv "${temp_output}" "${output}"
@@ -248,6 +229,191 @@ cluster_crd_exists() {
   local cluster="$1"
   local crd="$2"
   site_oc "${cluster}" get crd "${crd}"
+}
+
+operator_catalog_has_channel() {
+  local cluster="$1"
+  local package="$2"
+  local source="$3"
+  local channel="$4"
+
+  site_oc "${cluster}" -n openshift-marketplace \
+    get packagemanifest "${package}" -o json 2>/dev/null |
+    python3 -c '
+import json
+import sys
+
+source = sys.argv[1]
+channel = sys.argv[2]
+obj = json.load(sys.stdin)
+status = obj.get("status", {})
+
+if status.get("catalogSource") != source:
+    raise SystemExit(1)
+
+channels = {
+    entry.get("name")
+    for entry in status.get("channels", [])
+}
+raise SystemExit(0 if channel in channels else 1)
+' "${source}" "${channel}"
+}
+
+show_operator_catalog() {
+  local cluster="$1"
+  local package="$2"
+
+  site_oc "${cluster}" -n openshift-marketplace \
+    get packagemanifest "${package}" \
+    -o json 2>/dev/null |
+    python3 -c '
+import json
+import sys
+
+obj = json.load(sys.stdin)
+status = obj.get("status", {})
+channels = [
+    entry.get("name")
+    for entry in status.get("channels", [])
+    if entry.get("name")
+]
+
+print(
+    "package={package} source={source} defaultChannel={default} channels={channels}".format(
+        package=obj.get("metadata", {}).get("name", "<unknown>"),
+        source=status.get("catalogSource", "<unknown>"),
+        default=status.get("defaultChannel", "<none>"),
+        channels=",".join(channels) or "<none>",
+    )
+)
+' || true
+}
+
+wait_for_olm_subscription() {
+  local cluster="$1"
+  local namespace="$2"
+  local subscription="$3"
+  local expected_package="$4"
+  local expected_source="$5"
+  local expected_channel="$6"
+  local timeout_seconds="${7:-1800}"
+
+  local start now last_message=0
+  local payload
+  start="$(date +%s)"
+
+  while true; do
+    payload="$(
+      site_oc "${cluster}" -n "${namespace}" \
+        get subscriptions.operators.coreos.com "${subscription}" \
+        -o json 2>/dev/null || true
+    )"
+
+    if [[ -n "${payload}" ]]; then
+      if python3 - "${expected_package}" "${expected_source}" \
+        "${expected_channel}" <<<"${payload}" <<'PY'
+import json
+import sys
+
+expected_package, expected_source, expected_channel = sys.argv[1:]
+obj = json.load(sys.stdin)
+spec = obj.get("spec", {})
+
+if spec.get("name") != expected_package:
+    raise SystemExit(2)
+if spec.get("source") != expected_source:
+    raise SystemExit(3)
+if spec.get("channel") != expected_channel:
+    raise SystemExit(4)
+
+status = obj.get("status", {})
+raise SystemExit(0 if status.get("installedCSV") else 1)
+PY
+      then
+        local installed_csv
+        installed_csv="$(
+          python3 -c '
+import json
+import sys
+print(json.load(sys.stdin).get("status", {}).get("installedCSV", ""))
+' <<<"${payload}"
+        )"
+        ok "${cluster}: ${subscription} installed as ${installed_csv}"
+        return 0
+      else
+        local rc=$?
+        case "${rc}" in
+          2|3|4)
+            printf '[ERROR] %s: Subscription %s has the wrong package, source, or channel.\n' \
+              "${cluster}" "${subscription}" >&2
+            site_oc "${cluster}" -n "${namespace}" \
+              get subscriptions.operators.coreos.com "${subscription}" \
+              -o custom-columns='NAME:.metadata.name,PACKAGE:.spec.name,SOURCE:.spec.source,CHANNEL:.spec.channel,STATE:.status.state,CURRENT:.status.currentCSV,INSTALLED:.status.installedCSV' \
+              >&2 || true
+            show_operator_catalog "${cluster}" "${expected_package}" >&2
+            return 1
+            ;;
+        esac
+      fi
+    fi
+
+    now="$(date +%s)"
+    if (( now - start >= timeout_seconds )); then
+      printf '[ERROR] Timed out waiting for OLM Subscription %s on %s.\n' \
+        "${subscription}" "${cluster}" >&2
+
+      site_oc "${cluster}" -n "${namespace}" \
+        get subscriptions.operators.coreos.com "${subscription}" \
+        -o yaml >&2 || true
+
+      site_oc "${cluster}" -n "${namespace}" \
+        get installplans.operators.coreos.com >&2 || true
+
+      show_operator_catalog "${cluster}" "${expected_package}" >&2
+      return 1
+    fi
+
+    if (( now - last_message >= 30 )); then
+      printf '[INFO] %s: waiting for %s (%s/%s)\n' \
+        "${cluster}" "${subscription}" \
+        "${expected_source}" "${expected_channel}" >&2
+
+      if [[ -n "${payload}" ]]; then
+        python3 -c '
+import json
+import sys
+
+obj = json.load(sys.stdin)
+status = obj.get("status", {})
+conditions = status.get("conditions", [])
+
+print(
+    "  state={state} currentCSV={current} installedCSV={installed}".format(
+        state=status.get("state", "<none>"),
+        current=status.get("currentCSV", "<none>"),
+        installed=status.get("installedCSV", "<none>"),
+    ),
+    file=sys.stderr,
+)
+
+for condition in conditions:
+    print(
+        "  condition type={type} status={status} reason={reason} message={message}".format(
+            type=condition.get("type", ""),
+            status=condition.get("status", ""),
+            reason=condition.get("reason", ""),
+            message=condition.get("message", ""),
+        ),
+        file=sys.stderr,
+    )
+' <<<"${payload}"
+      fi
+
+      last_message="${now}"
+    fi
+
+    sleep 10
+  done
 }
 
 secret_exists() {

@@ -29,7 +29,7 @@ spec:
                   name: skupper-operator
                   namespace: openshift-operators
                 spec:
-                  channel: stable-2.2
+                  channel: stable-2
                   installPlanApproval: Automatic
                   name: skupper-operator
                   source: redhat-operators

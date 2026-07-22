@@ -29,9 +29,10 @@ spec:
                   name: cloudnative-pg
                   namespace: openshift-operators
                 spec:
+                  channel: stable-v1
                   installPlanApproval: Automatic
                   name: cloudnative-pg
-                  source: community-operators
+                  source: certified-operators
                   sourceNamespace: openshift-marketplace
 ---
 apiVersion: policy.open-cluster-management.io/v1
