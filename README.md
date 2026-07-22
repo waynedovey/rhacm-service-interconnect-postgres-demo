@@ -286,6 +286,39 @@ scripts/                              Bootstrap helpers and tests
 ## Troubleshooting
 
 
+### Vault pod fails with `unable to set CAP_SETFCAP effective capability`
+
+The HashiCorp Vault container entrypoint tries to set `cap_ipc_lock` on the
+Vault binary when it starts as root. OpenShift's `anyuid` SCC allows UID 0
+but does not grant `CAP_SETFCAP`, so that operation fails.
+
+The demo manifest sets:
+
+```yaml
+env:
+  - name: SKIP_SETCAP
+    value: "true"
+  - name: VAULT_DISABLE_MLOCK
+    value: "true"
+```
+
+This is appropriate for the included development-mode Vault. It avoids
+requesting additional Linux capabilities. Do not use this development
+Vault design for production secrets.
+
+Verify the rollout:
+
+```bash
+for cluster in cluster-pwv6d cluster-7b6lh
+do
+  oc --kubeconfig ".work/kubeconfigs/${cluster}.kubeconfig" \
+    rollout status deployment/vault-demo \
+    -n vault-demo --timeout=10m
+done
+```
+
+
+
 ### ApplicationSet reports `ocm-placement-generator not found`
 
 The `clusterDecisionResource` generator requires a ConfigMap in the same
