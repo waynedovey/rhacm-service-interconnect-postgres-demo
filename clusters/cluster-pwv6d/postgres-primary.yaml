@@ -15,12 +15,25 @@ spec:
         name: bookinfo-db-app
       postInitApplicationSQL:
         - |
-          CREATE TABLE IF NOT EXISTS site_heartbeats (
+          CREATE TABLE IF NOT EXISTS public.site_heartbeats (
             id BIGSERIAL PRIMARY KEY,
             site TEXT NOT NULL,
             pod TEXT NOT NULL,
             observed_at TIMESTAMPTZ NOT NULL DEFAULT now()
           );
+
+          ALTER TABLE public.site_heartbeats OWNER TO bookinfo;
+          ALTER SEQUENCE public.site_heartbeats_id_seq OWNER TO bookinfo;
+
+          GRANT USAGE ON SCHEMA public TO bookinfo;
+
+          GRANT SELECT, INSERT, UPDATE, DELETE
+          ON TABLE public.site_heartbeats
+          TO bookinfo;
+
+          GRANT USAGE, SELECT, UPDATE
+          ON SEQUENCE public.site_heartbeats_id_seq
+          TO bookinfo;
   storage:
     size: 10Gi
   postgresql:
