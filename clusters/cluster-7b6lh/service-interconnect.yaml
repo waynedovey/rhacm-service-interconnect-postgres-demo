@@ -26,7 +26,7 @@ metadata:
   name: postgres-site-a
   namespace: bookinfo
   annotations:
-    argocd.argoproj.io/sync-wave: "12"
+    argocd.argoproj.io/sync-wave: "5"
 spec:
   routingKey: postgres-site-a
   host: postgres-site-a
