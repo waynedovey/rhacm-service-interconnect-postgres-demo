@@ -6,3 +6,4 @@ resources:
   - 20-policy-service-interconnect.yaml
   - 30-policy-external-secrets.yaml
   - 40-policy-cloudnative-pg.yaml
+  - 50-policy-network-observer.yaml

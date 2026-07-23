@@ -1,0 +1,22 @@
+apiVersion: observability.skupper.io/v2alpha1
+kind: NetworkObserver
+metadata:
+  name: bookinfo-observer
+  namespace: bookinfo
+  annotations:
+    argocd.argoproj.io/sync-wave: "30"
+spec:
+  route:
+    enabled: true
+    annotations:
+      haproxy.router.openshift.io/timeout: 5m
+
+  auth:
+    strategy: openshift
+    openshift:
+      createCookieSecret: true
+      serviceAccount:
+        create: true
+
+  tls:
+    openshiftIssued: true

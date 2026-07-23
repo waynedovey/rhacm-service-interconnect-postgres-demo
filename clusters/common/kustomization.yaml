@@ -5,3 +5,4 @@ resources:
   - vault.yaml
   - external-secrets.yaml
   - bookinfo.yaml
+  - network-observer.yaml
