@@ -52,7 +52,7 @@ spec:
         - -dev-listen-address=0.0.0.0:8200
         env:
         - name: SKIP_SETCAP
-          value: 'true'
+          value: '1'
         - name: VAULT_DISABLE_MLOCK
           value: 'true'
         - name: VAULT_DEV_ROOT_TOKEN_ID
